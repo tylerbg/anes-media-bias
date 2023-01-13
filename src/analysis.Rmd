@@ -1,0 +1,126 @@
+---
+title: "ANES media bias"
+author: "Tyler Garner"
+date: "2022-12-29"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load-libs-and-data}
+library(tidyverse)
+
+anes <- read_csv("data/raw/anes_timeseries_2020_csv_20220210.csv",
+                 show_col_types = FALSE)
+```
+
+```{r}
+dim(anes)
+head(anes)
+```
+
+Select columns to use for K-NN imputing
+
+```{r}
+anes2 <- anes %>%
+  select(V201001:V201658p, # pre-election survey vars
+         V202001:V202645n, # post-election survey vars
+         V203400:V203416) # interviewer description vars
+
+# non_zero_vars <- sapply(anes2, function(x) length(unique(x))) %>%
+#   as.data.frame() %>%
+#   filter(. > 1) %>%
+#   rownames()
+
+anes2 <- anes2 %>%
+  mutate(V201630a = ifelse(V201630a < 0, NA, V201630a))
+```
+
+
+```{r}
+library(caret)
+
+preProcValues <- preProcess(anes2,
+                            "knnImpute")
+
+impute_anes_info <- predict(preProcValues, anes2, na.action = na.pass)
+
+impute_anes_info %>%
+  select(V201629a:V201629e)
+```
+
+
+
+Select the columns of interest
+
+```{r}
+anes2 <- anes %>%
+  select(V200010a:V200010d, # weights
+         V201018, # party affiliation
+         V202451:V202456, # empathy questions
+         V201629a:V201629e, # media types
+         V201630a:V201630s, # political shows 1
+         V201631a:V201631s, # shows 2
+         V201633a:V201633r, # radio programs
+         V201634a:V201634s, # websites
+         V201635a:V201635k, # newspapers
+         V201636a:V201636k) # online newspapers
+
+anes_fctrs <- anes2 %>%
+  select(V200010a:V202456)
+
+anes_media <- anes2 %>%
+  select(V201629a:V201636k)
+```
+
+```{r}
+adfontes <- read_csv('data/raw/adfontes.csv') %>%
+  mutate(Media = factor(Media))
+```
+
+```{r}
+adfontes %>%
+  group_by(Media) %>%
+  summarize(mean_rel = mean(Reliability, na.rm = TRUE),
+            mean_bias = mean(Bias, na.rm = TRUE))
+```
+
+```{r}
+hist(adfontes$Bias, breaks = 10)
+hist(adfontes$Reliability, breaks = 10)
+
+plot(adfontes$Bias,
+     adfontes$Reliability)
+```
+
+```{r}
+anes_media <- anes_media %>%
+  select(all_of(adfontes$Code))
+
+anes_media <- anes_media %>%
+  mutate(across(everything(), ~ ifelse(. < 0, NA, .)))
+
+# Remove vars without a '1' observation
+anes_no_var <- anes_media %>%
+  select(!where(~ max(.x, na.rm = TRUE) > 0)) %>%
+  colnames()
+
+anes_media <- anes_media %>%
+  select(!all_of(anes_no_var))
+```
+
+```{r}
+library(caret)
+
+preProcValues <- preProcess(anes_media,
+                            "knnImpute")
+
+impute_anes_info <- predict(preProcValues, anes_media, na.action = na.pass)
+
+impute_anes_info
+```
+
