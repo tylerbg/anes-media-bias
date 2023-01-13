@@ -27,54 +27,73 @@ Select columns to use for K-NN imputing
 
 ```{r}
 anes2 <- anes %>%
-  select(V201001:V201658p, # pre-election survey vars
-         V202001:V202645n, # post-election survey vars
-         V203400:V203416) # interviewer description vars
+  select(V201001:V201658p) # pre-election survey vars
+         # V202001:V202645n, # post-election survey vars
+         # V203400:V203416) # interviewer description vars
 
-# non_zero_vars <- sapply(anes2, function(x) length(unique(x))) %>%
-#   as.data.frame() %>%
-#   filter(. > 1) %>%
-#   rownames()
+# Remove vars with zero variance
+non_zero_vars <- sapply(anes2, function(x) length(unique(x))) %>%
+  as.data.frame() %>%
+  filter(. > 1) %>%
+  rownames()
 
 anes2 <- anes2 %>%
-  mutate(V201630a = ifelse(V201630a < 0, NA, V201630a))
+  select(all_of(non_zero_vars))
+
+# In media vars convert -9 (Refused) and -5 (Interview breakoff (sufficient partial IW)) to NA
+anes2 <- anes2 %>%
+  mutate(across(V201629a:V201636k, ~ ifelse(. < -1, NA, .)))
+
+# sum(apply(anes2, 1, function(x) all(!is.na(x))))
 ```
 
 
 ```{r}
+# Use KNN imputation to fill in missing values
 library(caret)
 
-preProcValues <- preProcess(anes2,
-                            "knnImpute")
+set.seed(4960)
+preProcValues <- preProcess(anes2 %>%
+                              select(V201629a:V201636k),
+                            "bagImpute",
+                            verbose = TRUE)
 
-impute_anes_info <- predict(preProcValues, anes2, na.action = na.pass)
+# preProcValues$data gets set as a tibble and the predict function does not like it, so force it to
+# a data frame then make predictions
+preProcValues$data <- data.frame(preProcValues$data)
 
-impute_anes_info %>%
-  select(V201629a:V201629e)
-```
+impute_anes_info <- predict(preProcValues,
+                            anes2,
+                            verbose = TRUE)
+                            # na.action = na.pass)
 
-
-
-Select the columns of interest
-
-```{r}
-anes2 <- anes %>%
-  select(V200010a:V200010d, # weights
-         V201018, # party affiliation
-         V202451:V202456, # empathy questions
-         V201629a:V201629e, # media types
+# Select the vars of interest (media vars)
+anes3 <- impute_anes_info %>%
+  select(V201629a:V201629e, # media types
          V201630a:V201630s, # political shows 1
-         V201631a:V201631s, # shows 2
+         V201631a:V201631s, # political shows 2
          V201633a:V201633r, # radio programs
          V201634a:V201634s, # websites
          V201635a:V201635k, # newspapers
          V201636a:V201636k) # online newspapers
 
-anes_fctrs <- anes2 %>%
-  select(V200010a:V202456)
+# Check that there are no NA values
+sum(is.na(anes3))
 
-anes_media <- anes2 %>%
-  select(V201629a:V201636k)
+
+```
+
+Select the columns of interest
+
+```{r}
+# Bind the weights, party affiliation, and empathy var columns
+anes4 <- anes %>%
+  select(V200010a:V200010d, # weights
+         V201018, # party affiliation
+         V202451:V202456) %>% # empathy questions
+  bind_cols(anes3)
+
+hist(anes4$V201634s)
 ```
 
 ```{r}
