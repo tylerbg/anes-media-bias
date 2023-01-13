@@ -51,49 +51,60 @@ anes2 <- anes2 %>%
 ```{r}
 # Use KNN imputation to fill in missing values
 library(caret)
+library(doParallel)
+
+n_cores <- parallel::detectCores()
+cl <- makeForkCluster(n_cores)
+registerDoParallel(cl)
+
+anes9 <- anes2 %>%
+  select(V201629a:V201636k)
 
 set.seed(4960)
-preProcValues <- preProcess(anes2 %>%
-                              select(V201629a:V201636k),
+preProcValues <- preProcess(anes9,
                             "bagImpute",
+                            k = 20,
+                            knnSummary = median,
                             verbose = TRUE)
 
 # preProcValues$data gets set as a tibble and the predict function does not like it, so force it to
 # a data frame then make predictions
-preProcValues$data <- data.frame(preProcValues$data)
+# preProcValues$data <- data.frame(preProcValues$data)
 
 impute_anes_info <- predict(preProcValues,
-                            anes2,
+                            anes9,
                             verbose = TRUE)
                             # na.action = na.pass)
 
-# Select the vars of interest (media vars)
-anes3 <- impute_anes_info %>%
-  select(V201629a:V201629e, # media types
-         V201630a:V201630s, # political shows 1
-         V201631a:V201631s, # political shows 2
-         V201633a:V201633r, # radio programs
-         V201634a:V201634s, # websites
-         V201635a:V201635k, # newspapers
-         V201636a:V201636k) # online newspapers
+stopCluster(cl)
+
+# # Select the vars of interest (media vars)
+# anes3 <- impute_anes_info %>%
+#   select(V201629a:V201629e, # media types
+#          V201630a:V201630s, # political shows 1
+#          V201631a:V201631s, # political shows 2
+#          V201633a:V201633r, # radio programs
+#          V201634a:V201634s, # websites
+#          V201635a:V201635k, # newspapers
+#          V201636a:V201636k) # online newspapers
 
 # Check that there are no NA values
-sum(is.na(anes3))
+sum(is.na(impute_anes_info))
 
-
+saveRDS(impute_anes_info, 'data/interim/imputed-media-vars.RDS')
 ```
 
 Select the columns of interest
 
 ```{r}
 # Bind the weights, party affiliation, and empathy var columns
-anes4 <- anes %>%
+anes3 <- anes %>%
   select(V200010a:V200010d, # weights
          V201018, # party affiliation
          V202451:V202456) %>% # empathy questions
-  bind_cols(anes3)
+  bind_cols(impute_anes_info)
 
-hist(anes4$V201634s)
+hist(anes3$V201634s)
 ```
 
 ```{r}
@@ -116,30 +127,62 @@ plot(adfontes$Bias,
      adfontes$Reliability)
 ```
 
+
 ```{r}
-anes_media <- anes_media %>%
-  select(all_of(adfontes$Code))
+# Keep only the media vars that have Reliability and Bias scores
+media_codes <- adfontes %>%
+  drop_na() %>%
+  pull(Code)
+  
+anes4 <- anes3 %>%
+  select(all_of(media_codes))
 
-anes_media <- anes_media %>%
-  mutate(across(everything(), ~ ifelse(. < 0, NA, .)))
+# Convert all -1 to 0
+anes4 <- anes4 %>%
+  mutate(across(everything(), ~ replace(., . == -1, 0)))
 
-# Remove vars without a '1' observation
-anes_no_var <- anes_media %>%
-  select(!where(~ max(.x, na.rm = TRUE) > 0)) %>%
-  colnames()
+anes4_bias <- anes4 * adfontes$Bias[match(names(anes4), adfontes$Code)][col(anes4)]
+anes4_rel <- anes4 * adfontes$Reliability[match(names(anes4), adfontes$Code)][col(anes4)]
 
-anes_media <- anes_media %>%
-  select(!all_of(anes_no_var))
+anes4$Total_Bias <- rowSums(anes4_bias)
+anes4$Total_Rel <- rowSums(anes4_rel)
+
+# Get the average Bias and Reliability based on the media consumed for each respondant
+# This will create NaN values for respondents with all 0 values
+anes4$Avg_Bias <- anes4$Total_Bias / rowSums(anes4_bias != 0)
+anes4$Avg_Rel <- anes4$Total_Rel / rowSums(anes4_rel != 0)
+
+# Replace NaN values with 0
+anes4 <- anes4 %>%
+  mutate(across(c(Avg_Bias, Avg_Rel), ~ replace(., is.nan(.), 0)))
+
+hist(anes4$Avg_Bias)
+hist(anes4$Avg_Rel)
 ```
 
 ```{r}
-library(caret)
+# Bind the weights, party affiliation, and empathy var columns
+anes_bias_rel <- anes %>%
+  select(V200010a, # pre-election data weights
+         V201018, # party affiliation
+         V202451:V202456) %>% # empathy questions
+  bind_cols(anes4)
+```
 
-preProcValues <- preProcess(anes_media,
-                            "knnImpute")
+```{r}
+empathy1 <- anes_bias_rel %>%
+  select(!V202452:V202456) %>%
+  filter(V202451 > 0)
 
-impute_anes_info <- predict(preProcValues, anes_media, na.action = na.pass)
+empathy1_lm <- lm(V202451 ~ Avg_Rel * Avg_Bias,
+                  data = empathy1,
+                  weights = V200010a)
+summary(empathy1_lm)
 
-impute_anes_info
+ggplot(empathy1,
+       aes(y = factor(V202451),
+           x = Avg_Bias * (1 / (Avg_Rel + 0.001)))) +
+  geom_boxplot() +
+  scale_x_reverse()
 ```
 
