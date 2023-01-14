@@ -11,6 +11,8 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+## Introduction
+
 ### Research Questions
 
 1. Do responses to questions on empathy and family politics vary by party affiliation?
@@ -18,6 +20,8 @@ knitr::opts_chunk$set(echo = TRUE)
 3. Is there a relationship between reponses to questions on empathy and family politics with social media usage?
 
 4. Do more biased media consumers vote in caucuses more often?
+
+## Data
 
 ```{r load-libs-and-data}
 library(MASS) # Load MASS first so dplyr::select() does not get masked
@@ -27,84 +31,73 @@ anes <- read_csv("data/raw/anes_timeseries_2020_csv_20220210.csv",
                  show_col_types = FALSE)
 ```
 
-```{r}
+```{r anes-desc-stats}
 dim(anes)
 head(anes)
 ```
 
 Create subsets of the ANES data set for the variables of interest.
 
-```{r}
+```{r anes-subset}
 # Pre- (a) and post-election (b) weights
 anes_weights <- anes %>%
   select(V200010a:V200010b)
 
 # Party affiliation, registration, and voting
 anes_registration <- anes %>%
-  select(V201018:V201021)
-
-# Family and empathy responses
+  select(V201018:V201021) %>%
+  select(!V201018z)
+         
+# Family and empathy responses, self-censorship, sexism
 anes_empathy <- anes %>%
-  select(V202451:V202456)
+  select(V202451:V202456,
+         V201626:V201627,
+         V201639:V201640)
 
 # Pre-election media responses
 anes_media <- anes %>%
-  select(V201629a:V201637x)
+  select(V201630a:V201630r, # TV programs 1
+         V201631a:V201631r, # TV programs 2
+         V201633a:V201633r, # Radio programs
+         V201634a:V201634q, # Websites
+         V201636a:V201636d) # Online newspapers
 
 # Post-election social media responses
 anes_social_media <- anes %>%
   select(V202541a:V202547) # Note there are post-election
 ```
 
-## Impute non-respondants
+### Impute non-respondants
 
-Select all of the pre-election survey columns to use for bagged tree imputing.  Remove variables with zero variance (have only 1 value).  Relabel media variables that are identified as 'Refused' or 'Interview breakoff' to NA (missing values) to be relabled later by bagged tree imputing.
+Select all of the pre-election survey columns to use for bagged tree imputing.  Remove variables with zero variance (have only 1 value).  Relabel media variables that are identified as 'Refused' or 'Interview breakoff' to NA (missing values) to be re-labled later by bagged tree imputing.
 
-```{r}
-anes_to_impute <- anes %>%
-  select(V201001:V201658p) # all pre-election survey vars
-
-# Remove vars with zero variance
-non_zero_vars <- sapply(anes_to_impute, function(x) length(unique(x))) %>%
-  as.data.frame() %>%
-  filter(. > 1) %>%
-  rownames()
-
-anes_to_impute <- anes_to_impute %>%
-  select(all_of(non_zero_vars))
+```{r prep-impute}
+# select party affiliation/registration status and media vars
+anes_to_impute <- anes_registration %>%
+  bind_cols(anes_media)
 
 # In media vars convert -9 (Refused) and -5 (Interview breakoff (sufficient partial IW)) to NA
 anes_to_impute <- anes_to_impute %>%
-  mutate(across(V201629a:V201636k, ~ ifelse(. < -1, NA, .)))
+  mutate(across(all_of(colnames(anes_media)),
+                ~ ifelse(. < -1, NA, .)))
 ```
 
-Implement the bagged tree imputation from the `caret` library to fill in missing values based on the pre-election data.
+Implement the bagged tree imputation from the `caret` library to fill in missing values based on the pre-election media and party affiliation/registration data.
 
-```{r}
+```{r bag-impute, eval = FALSE}
 # Use bagged tree imputation to fill in missing values
 library(caret)
-library(doParallel)
-
-n_cores <- parallel::detectCores()
-cl <- makeForkCluster(n_cores)
-registerDoParallel(cl)
-
-anes9 <- anes_to_impute %>%
-  select(V201629a:V201636k)
 
 set.seed(4960)
-preProcValues <- preProcess(anes9,
+preProcValues <- preProcess(anes_to_impute,
                             "bagImpute",
                             k = 20,
                             knnSummary = median,
                             verbose = TRUE)
 
 anes_imputed <- predict(preProcValues,
-                            anes9,
-                            verbose = TRUE)
-                            # na.action = na.pass)
-
-stopCluster(cl)
+                        anes_to_impute,
+                        verbose = TRUE)
 
 # Check that there are no NA values
 sum(is.na(anes_imputed))
@@ -114,23 +107,32 @@ saveRDS(anes_imputed, 'data/interim/imputed-media-vars.RDS')
 
 
 
-```{r}
+```{r read-imputed}
 anes_imputed <- readRDS('data/interim/imputed-media-vars.RDS')
 ```
 
-Bring in the Ad Fontes data and print out basic EDA
+### Bias and Reliability EDA
 
-```{r}
+Bring in the Ad Fontes Media data and print out basic EDA.
+
+```{r load-ad-fontes-media}
 adfontes <- read_csv('data/raw/adfontes.csv') %>%
-  mutate(Media = factor(Media))
+  mutate(Media = factor(Media)) %>%
+  drop_na()
 
 adfontes %>%
   group_by(Media) %>%
   summarize(mean_rel = mean(Reliability, na.rm = TRUE),
             mean_bias = mean(Bias, na.rm = TRUE))
 
-hist(adfontes$Bias, breaks = 10)
-hist(adfontes$Reliability, breaks = 10)
+adfontes %>%
+  pivot_longer(c(Bias, Reliability)) %>%
+  ggplot(aes(x = value)) +
+    geom_histogram(bins = 15) +
+    facet_wrap(~ name,
+               scales = 'free') +
+    theme_classic()
+
 
 ggplot(adfontes,
        aes(x = Bias,
@@ -140,11 +142,25 @@ ggplot(adfontes,
   theme_bw() +
   theme(legend.position = 'bottom')
 
-# Linear model of Bias vs Reliability
-bias_vs_rel <- lm(Reliability ~ abs(Bias),
-                  data = adfontes)
+# Create a linear model predicting Reliability by the abs val of Bias
+bias_rel_fit <- summary(lm(Reliability ~ abs(Bias),
+                   data = adfontes))
 
-summary(bias_vs_rel)
+ggplot(adfontes,
+       aes(x = abs(Bias),
+           y = Reliability,
+           color = Media)) +
+  geom_point(alpha = 0.5) +
+  geom_abline(slope = bias_rel_fit$coefficients[2, 1],
+              intercept = bias_rel_fit$coefficients[1, 1],
+              lty = 'dashed') +
+  annotate('text',
+           x = 20,
+           y = 45,
+           label = paste0('r2 = ', round(bias_rel_fit$r.squared, 3),
+                          '\np < 0.001')) +
+  theme_bw() +
+  theme(legend.position = 'bottom')
 ```
 
 
@@ -250,6 +266,11 @@ anes_plt_df %>%
   facet_wrap(~ empathy)
 ```
 
+
+
+
+## Statistical Analysis
+
 ```{r}
 library(rstatix)
 
@@ -271,9 +292,6 @@ anes_plt_df %>%
     facet_wrap(~ empathy)
   
 ```
-
-
-
 
 ```{r}
 fit <- anes_plt_df %>%
