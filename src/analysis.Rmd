@@ -11,7 +11,16 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+### Research Questions
+
+1. Do responses to questions on empathy and family politics vary by party affiliation?
+2. Are responses to questions on empathy and family politics associated with bias and reliability of media outlets?
+3. Is there a relationship between reponses to questions on empathy and family politics with social media usage?
+
+4. Do more biased media consumers vote in caucuses more often?
+
 ```{r load-libs-and-data}
+library(MASS) # Load MASS first so dplyr::select() does not get masked
 library(tidyverse)
 
 anes <- read_csv("data/raw/anes_timeseries_2020_csv_20220210.csv",
@@ -23,33 +32,56 @@ dim(anes)
 head(anes)
 ```
 
-Select columns to use for K-NN imputing
+Create subsets of the ANES data set for the variables of interest.
 
 ```{r}
-anes2 <- anes %>%
-  select(V201001:V201658p) # pre-election survey vars
-         # V202001:V202645n, # post-election survey vars
-         # V203400:V203416) # interviewer description vars
+# Pre- (a) and post-election (b) weights
+anes_weights <- anes %>%
+  select(V200010a:V200010b)
+
+# Party affiliation, registration, and voting
+anes_registration <- anes %>%
+  select(V201018:V201021)
+
+# Family and empathy responses
+anes_empathy <- anes %>%
+  select(V202451:V202456)
+
+# Pre-election media responses
+anes_media <- anes %>%
+  select(V201629a:V201637x)
+
+# Post-election social media responses
+anes_social_media <- anes %>%
+  select(V202541a:V202547) # Note there are post-election
+```
+
+## Impute non-respondants
+
+Select all of the pre-election survey columns to use for bagged tree imputing.  Remove variables with zero variance (have only 1 value).  Relabel media variables that are identified as 'Refused' or 'Interview breakoff' to NA (missing values) to be relabled later by bagged tree imputing.
+
+```{r}
+anes_to_impute <- anes %>%
+  select(V201001:V201658p) # all pre-election survey vars
 
 # Remove vars with zero variance
-non_zero_vars <- sapply(anes2, function(x) length(unique(x))) %>%
+non_zero_vars <- sapply(anes_to_impute, function(x) length(unique(x))) %>%
   as.data.frame() %>%
   filter(. > 1) %>%
   rownames()
 
-anes2 <- anes2 %>%
+anes_to_impute <- anes_to_impute %>%
   select(all_of(non_zero_vars))
 
 # In media vars convert -9 (Refused) and -5 (Interview breakoff (sufficient partial IW)) to NA
-anes2 <- anes2 %>%
+anes_to_impute <- anes_to_impute %>%
   mutate(across(V201629a:V201636k, ~ ifelse(. < -1, NA, .)))
-
-# sum(apply(anes2, 1, function(x) all(!is.na(x))))
 ```
 
+Implement the bagged tree imputation from the `caret` library to fill in missing values based on the pre-election data.
 
 ```{r}
-# Use KNN imputation to fill in missing values
+# Use bagged tree imputation to fill in missing values
 library(caret)
 library(doParallel)
 
@@ -57,7 +89,7 @@ n_cores <- parallel::detectCores()
 cl <- makeForkCluster(n_cores)
 registerDoParallel(cl)
 
-anes9 <- anes2 %>%
+anes9 <- anes_to_impute %>%
   select(V201629a:V201636k)
 
 set.seed(4960)
@@ -67,65 +99,54 @@ preProcValues <- preProcess(anes9,
                             knnSummary = median,
                             verbose = TRUE)
 
-# preProcValues$data gets set as a tibble and the predict function does not like it, so force it to
-# a data frame then make predictions
-# preProcValues$data <- data.frame(preProcValues$data)
-
-impute_anes_info <- predict(preProcValues,
+anes_imputed <- predict(preProcValues,
                             anes9,
                             verbose = TRUE)
                             # na.action = na.pass)
 
 stopCluster(cl)
 
-# # Select the vars of interest (media vars)
-# anes3 <- impute_anes_info %>%
-#   select(V201629a:V201629e, # media types
-#          V201630a:V201630s, # political shows 1
-#          V201631a:V201631s, # political shows 2
-#          V201633a:V201633r, # radio programs
-#          V201634a:V201634s, # websites
-#          V201635a:V201635k, # newspapers
-#          V201636a:V201636k) # online newspapers
-
 # Check that there are no NA values
-sum(is.na(impute_anes_info))
+sum(is.na(anes_imputed))
 
-saveRDS(impute_anes_info, 'data/interim/imputed-media-vars.RDS')
+saveRDS(anes_imputed, 'data/interim/imputed-media-vars.RDS')
 ```
 
-Select the columns of interest
+
 
 ```{r}
-# Bind the weights, party affiliation, and empathy var columns
-anes3 <- anes %>%
-  select(V200010a:V200010d, # weights
-         V201018, # party affiliation
-         V202451:V202456) %>% # empathy questions
-  bind_cols(impute_anes_info)
-
-hist(anes3$V201634s)
+anes_imputed <- readRDS('data/interim/imputed-media-vars.RDS')
 ```
+
+Bring in the Ad Fontes data and print out basic EDA
 
 ```{r}
 adfontes <- read_csv('data/raw/adfontes.csv') %>%
   mutate(Media = factor(Media))
-```
 
-```{r}
 adfontes %>%
   group_by(Media) %>%
   summarize(mean_rel = mean(Reliability, na.rm = TRUE),
             mean_bias = mean(Bias, na.rm = TRUE))
-```
 
-```{r}
 hist(adfontes$Bias, breaks = 10)
 hist(adfontes$Reliability, breaks = 10)
 
-plot(adfontes$Bias,
-     adfontes$Reliability)
+ggplot(adfontes,
+       aes(x = Bias,
+           y = Reliability,
+           color = Media)) +
+  geom_point(alpha = 0.5) +
+  theme_bw() +
+  theme(legend.position = 'bottom')
+
+# Linear model of Bias vs Reliability
+bias_vs_rel <- lm(Reliability ~ abs(Bias),
+                  data = adfontes)
+
+summary(bias_vs_rel)
 ```
+
 
 
 ```{r}
@@ -134,55 +155,143 @@ media_codes <- adfontes %>%
   drop_na() %>%
   pull(Code)
   
-anes4 <- anes3 %>%
+anes_imputed_media <- anes_imputed %>%
   select(all_of(media_codes))
 
 # Convert all -1 to 0
-anes4 <- anes4 %>%
+anes_imputed_media <- anes_imputed_media %>%
   mutate(across(everything(), ~ replace(., . == -1, 0)))
 
-anes4_bias <- anes4 * adfontes$Bias[match(names(anes4), adfontes$Code)][col(anes4)]
-anes4_rel <- anes4 * adfontes$Reliability[match(names(anes4), adfontes$Code)][col(anes4)]
+# Multiply col-wise to get the Bias and Reliability within each column
+anes_imputed_media_bias <- anes_imputed_media *
+  adfontes$Bias[match(names(anes_imputed_media),
+                      adfontes$Code)][col(anes_imputed_media)]
+anes_imputed_media_rel <- anes_imputed_media *
+  adfontes$Reliability[match(names(anes_imputed_media),
+                             adfontes$Code)][col(anes_imputed_media)]
 
-anes4$Total_Bias <- rowSums(anes4_bias)
-anes4$Total_Rel <- rowSums(anes4_rel)
+anes_imputed_media$Total_Bias <- rowSums(anes_imputed_media_bias)
+anes_imputed_media$Total_Rel <- rowSums(anes_imputed_media_rel)
 
 # Get the average Bias and Reliability based on the media consumed for each respondant
 # This will create NaN values for respondents with all 0 values
-anes4$Avg_Bias <- anes4$Total_Bias / rowSums(anes4_bias != 0)
-anes4$Avg_Rel <- anes4$Total_Rel / rowSums(anes4_rel != 0)
+anes_imputed_media$Avg_Bias <- anes_imputed_media$Total_Bias / rowSums(anes_imputed_media_bias != 0)
+anes_imputed_media$Avg_Rel <- anes_imputed_media$Total_Rel / rowSums(anes_imputed_media_rel != 0)
+
+anes_imputed_media$Median_Bias <- apply(anes_imputed_media_bias, 1, function(x) median(x[x !=0]))
+anes_imputed_media$Median_Rel <- apply(anes_imputed_media_rel, 1, function(x) median(x[x != 0]))
 
 # Replace NaN values with 0
-anes4 <- anes4 %>%
-  mutate(across(c(Avg_Bias, Avg_Rel), ~ replace(., is.nan(.), 0)))
+anes_imputed_media <- anes_imputed_media %>%
+  mutate(across(c(Avg_Bias, Avg_Rel), ~ replace(., is.nan(.), 0)),
+         across(c(Median_Bias, Median_Rel), ~ replace(., is.na(.), 0)))
 
-hist(anes4$Avg_Bias)
-hist(anes4$Avg_Rel)
+
+hist(anes_imputed_media$Avg_Bias, breaks = 20)
+hist(anes_imputed_media$Avg_Rel, breaks = 20)
+hist(anes_imputed_media$Median_Bias, breaks = 20)
+hist(anes_imputed_media$Median_Rel, breaks = 20)
 ```
 
 ```{r}
 # Bind the weights, party affiliation, and empathy var columns
-anes_bias_rel <- anes %>%
-  select(V200010a, # pre-election data weights
-         V201018, # party affiliation
-         V202451:V202456) %>% # empathy questions
-  bind_cols(anes4)
+anes_bias_rel <- anes_registration %>%
+  bind_cols(anes_weights, anes_empathy)
+
+# Plot the total number of respondents in each political affiliation
+anes_bias_rel %>%
+  select(V201018) %>%
+  group_by(V201018) %>%
+  summarize(n = n()) %>%
+  ggplot(aes(x = ordered(V201018),
+             y = n)) +
+    geom_col() +
+    scale_x_discrete(labels = c('Refused', 'Dont Know', 'Inapplicable', 'D', 'R', 'I', 'Other'))
+```
+
+Create a data frame in long format for plotting the weights, empathy, party affiliation, and bias/reliability variables.
+
+```{r}
+anes_plt_df <- anes_bias_rel %>%
+  select(V200010a, V201018, V202451:V202455, Avg_Bias:last_col()) %>%
+  pivot_longer(V202451:V202455,
+               names_to = 'empathy',
+               values_to = 'value') %>%
+  filter(value > 0) %>%
+  mutate(value = ordered(value))
+
+# Plot Reliability vs Bias for political party affiliation
+anes_plt_df %>%
+  select(!c(empathy, value)) %>%
+  distinct() %>%
+  filter(V201018 >= -1) %>%
+  ggplot(aes(x = Median_Bias,
+             y = Median_Rel,
+             color = ordered(V201018))) +
+  geom_point(alpha = 0.25)
+
+# Do the same plot but with only R, D, and I and recolored
+anes_plt_df %>%
+  select(!c(empathy, value)) %>%
+  distinct() %>%
+  filter(V201018 %in% c(1, 2, 4)) %>%
+  ggplot(aes(x = Median_Bias,
+             y = Median_Rel,
+             color = ordered(V201018))) +
+  geom_point(alpha = 0.25) +
+  scale_color_manual(values = c('blue', 'red', 'grey10'))
+
+# Plot Reliability vs Bias for each of the fampol and empathy
+anes_plt_df %>%
+  ggplot(aes(x = Median_Bias,
+             y = Median_Rel,
+             color = value)) +
+  geom_point(alpha = 0.5) +
+  facet_wrap(~ empathy)
 ```
 
 ```{r}
-empathy1 <- anes_bias_rel %>%
-  select(!V202452:V202456) %>%
-  filter(V202451 > 0)
+library(rstatix)
 
-empathy1_lm <- lm(V202451 ~ Avg_Rel * Avg_Bias,
-                  data = empathy1,
-                  weights = V200010a)
-summary(empathy1_lm)
+# Kruskal-Wallis test to see if repsondants vary on empathy based on political party
+anes_plt_df %>%
+  filter(V201018 %in% c(1, 2, 4)) %>%
+  group_by(empathy) %>%
+  kruskal_test(value ~ V201018) %>%
+  adjust_pvalue()
 
-ggplot(empathy1,
-       aes(y = factor(V202451),
-           x = Avg_Bias * (1 / (Avg_Rel + 0.001)))) +
-  geom_boxplot() +
-  scale_x_reverse()
+anes_plt_df %>%
+  filter(V201018 %in% c(1, 2, 4)) %>%
+  group_by(V201018, empathy, value) %>%
+  summarize(n = n()) %>%
+  ggplot(aes(x = ordered(V201018),
+             y = n,
+             fill = value)) +
+    geom_col(position = 'fill') +
+    facet_wrap(~ empathy)
+  
+```
+
+
+
+
+```{r}
+fit <- anes_plt_df %>%
+  filter(empathy == 'V202451') %>%
+  polr(formula = value ~ abs(Median_Bias) * Median_Rel,
+       weights = V200010a,
+       Hess = TRUE)
+  
+summary(fit)
+
+## Get table of coefficients
+coef_table <- coef(summary(fit))
+
+## Estimate and print p-values
+p <- pnorm(abs(coef_table[, "t value"]), lower.tail = FALSE) * 2
+
+coef_table <- cbind(coef_table, "p value" = round(p, 4))
+
+coef_table
 ```
 
