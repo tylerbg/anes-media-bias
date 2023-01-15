@@ -13,18 +13,60 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ## Introduction
 
+The American National Election Studies (ANES) surveys eligible voters in the U.S. pre- and post-presidential elections across a number of variables.  For the pre-election survey for 2020, new survey questions on sexual harassment and misconduct, health insurance, identity politics, immigration, media trust and misinformation, institutional legitimacy, campaigns, party images, trade tariffs, and tax policy were used.  The data collection began in August 2020 and continued up until election day on November 3rd, 2020.
+
+The Ad Fontes Media group rates media sources based on their left- to right-leaning political bias and reliability.  Identifying as a non-partisan group, the media bias project rates individual new articles, television shows, and radio programs by at least three analysts with different political leanings.
+
+![Ad Fontes Chart](references/images/ad-fontes-chart.png)
+
+The purpose of this analysis is to combine the ANES survey results with data from the Ad Fontes Media project to assess differences on empathy, family potics, self-censorship, and sexism based on the bias and reliability scores of the media consumed by each respondent.
+
 ### Research Questions
 
 1. Do responses to questions on empathy and family politics vary by party affiliation?
 2. Are responses to questions on empathy and family politics associated with bias and reliability of media outlets?
-3. Is there a relationship between reponses to questions on empathy and family politics with social media usage?
+3. Is there a relationship between responses to questions on empathy and family politics with social media usage?
 
-4. Do more biased media consumers vote in caucuses more often?
+4. Are any specific media outlets predicitve of empathy or emotion responses?
+
+5. Do more biased media consumers vote in caucuses more often?
 
 ## Data
 
-```{r load-libs-and-data}
-library(MASS) # Load MASS first so dplyr::select() does not get masked
+### Variables
+
+#### Emotion
+
+- *V201114* - are things in the country on track
+- *V201115* - how hopeful R feels about how things are going in the country
+- *V201116* - how afraid R feels about how things are going in the country
+- *V201117* - how outraged R feels about how things are going in the country
+- *V201118* - how angry R feels about how things are going in the country
+- *V201119* - how happy R feels about how things are going in the country
+- *V201120* - how worried R feels about how things are going in the country
+- *V201121* - how proud R feels about how things are going in the country
+- *V201122* - how irritated R feels about how things are going in the country
+- *V201123* - how nervous R feels about how things are going in the country
+
+#### Family and racial empathy
+
+- *V202451* - how much have political differences hurt relationships w/family
+- *V202452* - how often does R have concerned feelings for other racial/ethnic groups
+- *V202453* - how often does R try to understand perspective of other racial/ethnic groups
+- *V202454* - how often R imagines how they would feel before criticizing other groups
+- *V202455* - how often R feels protective of someone due to race or ethnicity
+
+#### Self-censorship
+
+- *V201626* - need to be more sensitive talking or people too easily offended
+- *V201627* - how often self censor
+
+#### Sexism
+
+- *V201639* - women interpret innocent remarks as sexist
+- *V201640* - women seek to gain power by getting control over men
+
+```{r load-libs-and-data, warning = FALSE}
 library(tidyverse)
 
 anes <- read_csv("data/raw/anes_timeseries_2020_csv_20220210.csv",
@@ -48,18 +90,20 @@ anes_registration <- anes %>%
   select(V201018:V201021) %>%
   select(!V201018z)
          
-# Family and empathy responses, self-censorship, sexism
-anes_empathy <- anes %>%
-  select(V202451:V202456,
-         V201626:V201627,
-         V201639:V201640)
+# Family and emotion, empathy, self-censorship, sexism
+anes_emotion <- anes %>%
+  select(V201114:V201123, # emotion about the country
+         V202451:V202456, # family and empathy
+         V201626:V201627, # self-censorship
+         V201639:V201640) # sexism
 
 # Pre-election media responses
 anes_media <- anes %>%
   select(V201630a:V201630r, # TV programs 1
          V201631a:V201631r, # TV programs 2
          V201633a:V201633r, # Radio programs
-         V201634a:V201634q, # Websites
+         V201634a:V201634c,V201634e:V201634f, V201634h,
+         V201634j:V201634q, # Websites not included in online newspapers
          V201636a:V201636d) # Online newspapers
 
 # Post-election social media responses
@@ -113,7 +157,7 @@ anes_imputed <- readRDS('data/interim/imputed-media-vars.RDS')
 
 ### Bias and Reliability EDA
 
-Bring in the Ad Fontes Media data and print out basic EDA.
+Bring in the Ad Fontes Media data and print out the average Reliability and Bias scores for each type of media.  Also print out the number of media sources that have 'left', 'right', or 'center' Bias.  It will be assumed that 'center' is between a -5 and 5 Bias score.
 
 ```{r load-ad-fontes-media}
 adfontes <- read_csv('data/raw/adfontes.csv') %>%
@@ -125,6 +169,18 @@ adfontes %>%
   summarize(mean_rel = mean(Reliability, na.rm = TRUE),
             mean_bias = mean(Bias, na.rm = TRUE))
 
+# Print the number of media sources with right, left, or center bias
+adfontes %>%
+  mutate(side = case_when(Bias > 10 ~ 'Right',
+                          Bias < -10 ~ 'Left',
+                          TRUE ~ 'Center')) %>%
+  group_by(side) %>%
+  summarize(n = n())
+```
+
+
+
+```{r adfontes-bias-rel-corr}
 adfontes %>%
   pivot_longer(c(Bias, Reliability)) %>%
   ggplot(aes(x = value)) +
@@ -155,29 +211,42 @@ ggplot(adfontes,
               intercept = bias_rel_fit$coefficients[1, 1],
               lty = 'dashed') +
   annotate('text',
-           x = 20,
-           y = 45,
-           label = paste0('r2 = ', round(bias_rel_fit$r.squared, 3),
+           x = 22.5,
+           y = 40,
+           label = paste0('r^2 = ', round(bias_rel_fit$r.squared, 3),
                           '\np < 0.001')) +
   theme_bw() +
   theme(legend.position = 'bottom')
 ```
 
+The non-transformed distributions of the Reliability vs Bias scores are curvi-linear while when taking the absolute value of Bias it becomes strongly linear.  This suggests that there is a strong relationship between Reliability and Bias, regardless if the Bias is 'left' or 'right', and it appears that this relationship stays trued independent of the type of media.
 
+The ANES media variables will be filtered so that only those media variabes that have Bias and Reliability scores from Ad Fontes Media are included.  To note this was not done prior to imputation as the full variable set could be important for accurately predicting missing values in the bagged tree imputation.
 
-```{r}
+```{r keep-adfontes-vars}
 # Keep only the media vars that have Reliability and Bias scores
 media_codes <- adfontes %>%
   drop_na() %>%
+  filter(Code != 'V201634d',
+         Code != 'V201634i',
+         Code != 'V201634g') %>%
   pull(Code)
   
 anes_imputed_media <- anes_imputed %>%
   select(all_of(media_codes))
+```
 
+It will be assumed that all inapplicable media responses (-1) are equivalent to 'no response' (0), so they will be transformed to 0.
+
+```{r transform-inapp}
 # Convert all -1 to 0
 anes_imputed_media <- anes_imputed_media %>%
   mutate(across(everything(), ~ replace(., . == -1, 0)))
+```
 
+The total, average, and median Bias and Reliability scores for the media consumed by each participant will be calculated.  Media not consumed (value of 0) will not be included in the calculations.  Bias will also be left as-is so that respondents who consume media on both sides can be centered (toward 0).
+
+```{r bias-rel-sum-stats}
 # Multiply col-wise to get the Bias and Reliability within each column
 anes_imputed_media_bias <- anes_imputed_media *
   adfontes$Bias[match(names(anes_imputed_media),
@@ -203,32 +272,36 @@ anes_imputed_media <- anes_imputed_media %>%
          across(c(Median_Bias, Median_Rel), ~ replace(., is.na(.), 0)))
 
 
-hist(anes_imputed_media$Avg_Bias, breaks = 20)
-hist(anes_imputed_media$Avg_Rel, breaks = 20)
-hist(anes_imputed_media$Median_Bias, breaks = 20)
-hist(anes_imputed_media$Median_Rel, breaks = 20)
+anes_imputed_media %>%
+  select(Total_Bias:Median_Rel) %>%
+  pivot_longer(everything()) %>%
+  ggplot(aes(x = value)) +
+    geom_histogram(bins = 50) +
+    facet_wrap(~ name, scales = 'free') +
+    theme_classic()
 ```
 
 ```{r}
 # Bind the weights, party affiliation, and empathy var columns
-anes_bias_rel <- anes_registration %>%
-  bind_cols(anes_weights, anes_empathy)
+anes_to_model <- anes_registration %>%
+  bind_cols(anes_weights, anes_empathy, anes_imputed_media)
 
 # Plot the total number of respondents in each political affiliation
-anes_bias_rel %>%
+anes_to_model %>%
   select(V201018) %>%
   group_by(V201018) %>%
   summarize(n = n()) %>%
   ggplot(aes(x = ordered(V201018),
              y = n)) +
     geom_col() +
-    scale_x_discrete(labels = c('Refused', 'Dont Know', 'Inapplicable', 'D', 'R', 'I', 'Other'))
+    scale_x_discrete(labels = c('Refused', 'Dont Know', 'Inapplicable', 'D', 'R', 'I', 'Other')) +
+    theme_classic()
 ```
 
 Create a data frame in long format for plotting the weights, empathy, party affiliation, and bias/reliability variables.
 
 ```{r}
-anes_plt_df <- anes_bias_rel %>%
+anes_plt_df <- anes_to_model %>%
   select(V200010a, V201018, V202451:V202455, Avg_Bias:last_col()) %>%
   pivot_longer(V202451:V202455,
                names_to = 'empathy',
@@ -274,12 +347,27 @@ anes_plt_df %>%
 ```{r}
 library(rstatix)
 
-# Kruskal-Wallis test to see if repsondants vary on empathy based on political party
+# Kruskal-Wallis test to see if respondents vary on empathy based on political party
 anes_plt_df %>%
   filter(V201018 %in% c(1, 2, 4)) %>%
   group_by(empathy) %>%
-  kruskal_test(value ~ V201018) %>%
+  kruskal_test(V201018 ~ value) %>%
   adjust_pvalue()
+
+# Kruskal-Wallis test to see if respondents vary on empathy based on median Bias
+anes_plt_df %>%
+  filter(V201018 %in% c(1, 2, 4)) %>%
+  group_by(empathy) %>%
+  kruskal_test(Median_Bias ~ value) %>%
+  adjust_pvalue()
+
+# Kruskal-Wallis test to see if respondents vary on empathy based on median Reliability
+anes_plt_df %>%
+  filter(V201018 %in% c(1, 2, 4)) %>%
+  group_by(empathy) %>%
+  kruskal_test(Median_Rel ~ value) %>%
+  adjust_pvalue()
+
 
 anes_plt_df %>%
   filter(V201018 %in% c(1, 2, 4)) %>%
@@ -294,22 +382,160 @@ anes_plt_df %>%
 ```
 
 ```{r}
-fit <- anes_plt_df %>%
-  filter(empathy == 'V202451') %>%
-  polr(formula = value ~ abs(Median_Bias) * Median_Rel,
-       weights = V200010a,
-       Hess = TRUE)
-  
+fampol_diffhurt <- anes_plt_df %>%
+  filter(empathy == 'V202451',
+         Median_Bias != 0 & Median_Rel != 0)
+
+# Example weight = original weight * downsampling factor
+n_samples <- nrow(fampol_diffhurt)
+n_classes <- length(unique(fampol_diffhurt$value))
+fampol_diffhurt_case_wts <- fampol_diffhurt %>%
+  group_by(value) %>%
+  summarize(n_samples_j = n(),
+            case_wts = n_samples / (n_classes * n_samples_j))
+
+fampol_diffhurt$case_wts <- fampol_diffhurt %>%
+  select(value) %>%
+  mutate(case_wts = case_when(value == 1 ~ fampol_diffhurt_case_wts$case_wts[1],
+                              value == 2 ~ fampol_diffhurt_case_wts$case_wts[2],
+                              value == 3 ~ fampol_diffhurt_case_wts$case_wts[3],
+                              value == 4 ~ fampol_diffhurt_case_wts$case_wts[4],
+                              value == 5 ~ fampol_diffhurt_case_wts$case_wts[5])) %>%
+  pull(case_wts)
+
+fampol_diffhurt$wts <- fampol_diffhurt$V200010a * fampol_diffhurt$case_wts
+
+library(VGAM)
+
+fit <- vglm(formula = value ~ Median_Bias * Median_Rel,
+            data = fampol_diffhurt,
+            weights = wts,
+            family = cumulative(parallel = TRUE))
+
 summary(fit)
+
+fit_preds <- predict(fit, type = 'response')
+
+preds <- apply(fit_preds, 1, which.max)
+
+table(fampol_diffhurt %>%
+        pull(value),
+      preds)
 
 ## Get table of coefficients
 coef_table <- coef(summary(fit))
 
 ## Estimate and print p-values
-p <- pnorm(abs(coef_table[, "t value"]), lower.tail = FALSE) * 2
+p <- pnorm(abs(coef_table[, "z value"]), lower.tail = FALSE) * 2
 
 coef_table <- cbind(coef_table, "p value" = round(p, 4))
 
 coef_table
+
+ggplot(fampol_diffhurt,
+       aes(x = Median_Bias * (max(Median_Rel) - Median_Rel),
+           y = value)) +
+  geom_boxplot()
+
+anova(fit)
+
+logLik(fit)
 ```
 
+### Random Forest
+
+```{r}
+library(tidymodels)
+
+famdiff_rfor_df <- anes_to_model %>%
+  select(V200010a, V202451, V201630b:V201636d) %>%
+  filter(V202451 > 0) %>%
+  mutate(V202451 = ordered(V202451))
+
+# Example weight = original weight * downsampling factor
+n_samples <- nrow(famdiff_rfor_df)
+n_classes <- length(unique(famdiff_rfor_df$V202451))
+famdiff_rfor_case_wts <- famdiff_rfor_df %>%
+  group_by(V202451) %>%
+  summarize(n_samples_j = n(),
+            case_wts = n_samples / (n_classes * n_samples_j))
+s
+famdiff_rfor_df$case_wts <- famdiff_rfor_df %>%
+  select(V202451) %>%
+  mutate(case_wts = case_when(V202451 == 1 ~ famdiff_rfor_case_wts$case_wts[1],
+                              V202451 == 2 ~ famdiff_rfor_case_wts$case_wts[2],
+                              V202451 == 3 ~ famdiff_rfor_case_wts$case_wts[3],
+                              V202451 == 4 ~ famdiff_rfor_case_wts$case_wts[4],
+                              V202451 == 5 ~ famdiff_rfor_case_wts$case_wts[5])) %>%
+  pull(case_wts)
+
+famdiff_rfor_df$case_wts <- famdiff_rfor_df$V200010a * famdiff_rfor_df$case_wts
+
+famdiff_rfor_df <- famdiff_rfor_df %>%
+  select(!V200010a) %>%
+  mutate(case_wts = importance_weights(case_wts))
+
+famdiff_rfor_df_split <- initial_split(famdiff_rfor_df,
+                                       prop = 3/4)
+
+famdiff_rfor_df_train <- training(famdiff_rfor_df_split)
+famdiff_rfor_df_test <- testing(famdiff_rfor_df_split)
+
+cv_folds <- vfold_cv(famdiff_rfor_df_train,)
+
+rfor_recipe <- recipe(V202451 ~ .,
+                      data = famdiff_rfor_df)
+
+rfor_model <- rand_forest(mtry = tune(),
+                          trees = tune(),
+                          min_n = tune()) %>%
+  set_engine('ranger',
+             num.threads = 14,
+             importance = "impurity") %>%
+  set_mode('classification')
+
+rfor_params <- rfor_model %>%
+  extract_parameter_set_dials() %>%
+  update(mtry = mtry(c(1, 50)))
+
+rfor_wf <- workflow() %>%
+  add_recipe(rfor_recipe) %>%
+  add_model(rfor_model) %>%
+  add_case_weights(case_wts)
+
+set.seed(4960)
+rfor_bayes_tune <- rfor_wf %>%
+  tune_bayes(resamples = cv_folds,
+             iter = 50,
+             param_info = rfor_params,
+             metrics = metric_set(roc_auc),
+             initial = 5,
+             control = control_bayes(verbose = TRUE,
+                                     verbose_iter = TRUE))
+
+select_best(rfor_bayes_tune)
+
+final_params <- select_best(rfor_bayes_tune) %>%
+  select(!.config)
+
+rfor_final_wf <- rfor_wf %>%
+  finalize_workflow(final_params)
+
+rfor_fit <- rfor_final_wf %>%
+  fit(famdiff_rfor_df_train)
+
+rfor_preds <- predict(rfor_fit,
+                      new_data = famdiff_rfor_df_test)
+
+table(obs = famdiff_rfor_df_test %>% pull(V202451),
+      pred = rfor_preds$.pred_class)
+
+accuracy_vec(famdiff_rfor_df_test %>% pull(V202451) %>% factor(),
+             rfor_preds$.pred_class)
+
+library(vip)
+
+rfor_fit %>%
+  extract_fit_parsnip() %>%
+  vip()
+```
