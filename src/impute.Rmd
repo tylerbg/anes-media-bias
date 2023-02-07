@@ -83,6 +83,63 @@ anes_to_impute <- anes %>%
 
 The `missForest()` from the `missForest` library will be used to impute the missing values generated above using a random forest model. This approach has the advantage of being able to impute categorical data while handling complex interactions and nonlinear relationships. However, the algorithm has a long computation time, particularly when there are a lot of variables in the dataset.
 
+First, the imputation method will be tested on known data to check whether the imputation on unknown data can be trusted.
+
+```{r impute-test}
+library(missForest)
+library(doParallel)
+
+# Select rows where all media variables do not contain missing values
+impute_test_df <- anes_to_impute %>%
+  filter(across(V201630a:V201636d, ~ !is.na(.)))
+
+test_to_impute <- impute_test_df
+
+set.seed(1)
+test_to_impute <- test_to_impute %>%
+  mutate(V201630a = prodNA(impute_test_df %>% select(V201630a)),
+         across(V201630b:V201630s, ~ ifelse(is.na(V201630a), NA, .)))
+
+set.seed(2)
+test_to_impute <- test_to_impute %>%
+  mutate(V201631a = prodNA(impute_test_df %>% select(V201631a)),
+         across(V201631a:V201631s, ~ ifelse(is.na(V201631a), NA, .)))
+
+set.seed(3)
+test_to_impute <- test_to_impute %>%
+  mutate(V201633a = prodNA(impute_test_df %>% select(V201633a)),
+         across(V201633a:V201633r, ~ ifelse(is.na(V201633a), NA, .)))
+
+set.seed(4)
+test_to_impute <- test_to_impute %>%
+  mutate(V201634a = prodNA(impute_test_df %>% select(V201634a)),
+         across(V201634a:V201634s, ~ ifelse(is.na(V201634a), NA, .)))
+
+set.seed(5)
+test_to_impute <- test_to_impute %>%
+  mutate(V201636a = prodNA(impute_test_df %>% select(V201636a)),
+         across(V201636a:V201636d, ~ ifelse(is.na(V201636a), NA, .)))
+
+# Create parallel backend
+n_cores <- parallel::detectCores()
+
+cl <- makeForkCluster(n_cores)
+registerDoParallel(cl)
+
+test_imputed <- test_to_impute %>%
+  missForest(verbose = TRUE,
+             maxiter = 10,
+             xtrue = impute_test_df,
+             parallelize = 'forests')
+
+stopCluster(cl)
+
+saveRDS(anes_imputed, 'data/interim/missForst-imputed.RDS')
+
+
+```
+
+
 The function by default will run over 10 iterations and takes a sizeable amount of time with this dataset, so a parallel backend will be registered using all available cores to save computation time.
 
 ```{r impute}
