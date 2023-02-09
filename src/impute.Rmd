@@ -75,7 +75,7 @@ anes_to_impute <- anes %>%
   mutate(across(everything(),
                 as.numeric),
          across(all_of(anes_media_vars),
-                ~ factor(ifelse(. < 0, NA, .)))) %>%
+                ~ as.factor(as.character(ifelse(. < 0, NA, .))))) %>%
   as.data.frame()
 ```
 
@@ -91,34 +91,61 @@ library(doParallel)
 
 # Select rows where all media variables do not contain missing values
 impute_test_df <- anes_to_impute %>%
-  filter(across(V201630a:V201636d, ~ !is.na(.)))
+  filter(if_all(V201630a:V201636d, ~ !is.na(.)))
 
 test_to_impute <- impute_test_df
 
 set.seed(1)
+V201630a_na <- impute_test_df %>%
+  select(V201630a) %>%
+  prodNA()
+
 test_to_impute <- test_to_impute %>%
-  mutate(V201630a = prodNA(impute_test_df %>% select(V201630a)),
-         across(V201630b:V201630s, ~ ifelse(is.na(V201630a), NA, .)))
+  mutate(V201630a = as.numeric(V201630a_na$V201630a) - 1,
+         across(V201630b:V201630r, ~ ifelse(is.na(V201630a), NA, .) - 1),
+         across(V201630a:V201630r, ~ as.factor(as.character(.))))
 
 set.seed(2)
+V201631a_na <- impute_test_df %>%
+  select(V201631a) %>%
+  prodNA()
+
 test_to_impute <- test_to_impute %>%
-  mutate(V201631a = prodNA(impute_test_df %>% select(V201631a)),
-         across(V201631a:V201631s, ~ ifelse(is.na(V201631a), NA, .)))
+  mutate(V201631a = as.numeric(V201631a_na$V201631a) - 1,
+         across(V201631b:V201631r, ~ ifelse(is.na(V201631a), NA, .) - 1),
+         across(V201631a:V201631r, ~ as.factor(as.character(.))))
 
 set.seed(3)
+V201633a_na <- impute_test_df %>%
+  select(V201633a) %>%
+  prodNA()
+
 test_to_impute <- test_to_impute %>%
-  mutate(V201633a = prodNA(impute_test_df %>% select(V201633a)),
-         across(V201633a:V201633r, ~ ifelse(is.na(V201633a), NA, .)))
+  mutate(V201633a = as.numeric(V201633a_na$V201633a) - 1,
+         across(V201633b:V201633q, ~ ifelse(is.na(V201633a), NA, .) - 1),
+         across(V201633a:V201633q, ~ as.factor(as.character(.))))
 
 set.seed(4)
+V201634a_na <- impute_test_df %>%
+  select(V201634a) %>%
+  prodNA()
+
 test_to_impute <- test_to_impute %>%
-  mutate(V201634a = prodNA(impute_test_df %>% select(V201634a)),
-         across(V201634a:V201634s, ~ ifelse(is.na(V201634a), NA, .)))
+  mutate(V201634a = as.numeric(V201634a_na$V201634a) - 1,
+         across(c(V201634b:V201634c,V201634e:V201634f, V201634h, V201634j:V201634q),
+                ~ ifelse(is.na(V201634a), NA, .) - 1),
+         across(c(V201634a:V201634c,V201634e:V201634f, V201634h, V201634j:V201634q),
+         ~ as.factor(as.character(.))))
 
 set.seed(5)
+V201636a_na <- impute_test_df %>%
+  select(V201636a) %>%
+  prodNA()
+
 test_to_impute <- test_to_impute %>%
-  mutate(V201636a = prodNA(impute_test_df %>% select(V201636a)),
-         across(V201636a:V201636d, ~ ifelse(is.na(V201636a), NA, .)))
+  mutate(V201636a = as.numeric(V201636a_na$V201636a) - 1,
+         across(V201636b:V201636d, ~ ifelse(is.na(V201636a), NA, .) - 1),
+         across(V201636a:V201636d, ~ as.factor(as.character(.))))
 
 # Create parallel backend
 n_cores <- parallel::detectCores()
@@ -126,19 +153,25 @@ n_cores <- parallel::detectCores()
 cl <- makeForkCluster(n_cores)
 registerDoParallel(cl)
 
+set.seed(4960)
 test_imputed <- test_to_impute %>%
   missForest(verbose = TRUE,
              maxiter = 10,
-             xtrue = impute_test_df,
+             # xtrue = impute_test_df, this does not work ??
+             # Error in ximp[mis] - xtrue[mis] : non-numeric argument to binary operator
              parallelize = 'forests')
 
 stopCluster(cl)
 
-saveRDS(anes_imputed, 'data/interim/missForst-imputed.RDS')
+test_imputed_table <- table(impute_test_df[is.na(test_to_impute)],
+      test_imputed$ximp[is.na(test_to_impute)])
 
+test_imputed_table
 
+sum(diag(test_imputed_table)) / sum(test_imputed_table)
 ```
 
+The total accuracy predicting the missing variables was 90.5%, with 90.9% of '0's and 69.2% of '1's correctly imputed.
 
 The function by default will run over 10 iterations and takes a sizeable amount of time with this dataset, so a parallel backend will be registered using all available cores to save computation time.
 
@@ -152,6 +185,7 @@ n_cores <- parallel::detectCores()
 cl <- makeForkCluster(n_cores)
 registerDoParallel(cl)
 
+set.seed(4960)
 anes_imputed <- anes_to_impute %>%
   missForest(verbose = TRUE,
              maxiter = 10,
