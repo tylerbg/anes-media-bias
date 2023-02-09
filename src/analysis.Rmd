@@ -68,6 +68,22 @@ The purpose of the analysis is to combine data from the ANES survey with the Ad 
 - *V201639* - women interpret innocent remarks as sexist
 - *V201640* - women seek to gain power by getting control over men
 
+#### Political violence
+
+- *V201602* - how much do you feel it is justified for people to use violence to pursue their political goals in this country?
+- *V201603* - compared to four years ago, do you think violence used to pursue political goals in the United States has:
+- *V201604* - has it [increased/decreased] a great deal, a moderate amount, or a little?
+- *V201605x* - Summary of V201603 and V201604
+
+#### Discussing politics
+- *V202022* - Do you ever discuss politics with your family or friends?
+- *V202023* - How many days in the past week did you talk about politics with family or friends?
+- *V202024* - During the past 12 months, have you ever gotten into a political argument with someone, or have you not done this in the past 12 months?
+
+
+
+
+
 ```{r load-libs-and-data, warning = FALSE}
 library(tidyverse)
 
