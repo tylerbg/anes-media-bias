@@ -140,7 +140,7 @@ saveRDS(anes_imputed, 'data/interim/missForst-imputed.RDS')
 ```
 
 The imputation ended at iteration 9 as the differences increased and so iteration 8 was taken as the final estimate.
-The out-of-bag (OOB) error is `r round(anes_imputed$OOBerror[2], 5)`, which can be considered equivalent to ~ 92% accuracy since the variables being imputed on are binary.
+The out-of-bag (OOB) proportion of falsely classified predictions is 0.08082, which can be considered equivalent to ~ 92% accuracy since the variables being imputed on are binary.
 
 
 Calculate # of rows of non-missing data in responses
