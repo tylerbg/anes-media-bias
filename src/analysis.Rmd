@@ -110,10 +110,12 @@ anes_registration <- anes %>%
          
 # Family and emotion, empathy, self-censorship, sexism
 anes_emotion <- anes %>%
-  select(V201114:V201123, # emotion about the country
-         V202451:V202456, # family and empathy
-         V201626:V201627, # self-censorship
-         V201639:V201640) # sexism
+  select(V201114:V201123, # Emotion about the country
+         V202451:V202456, # Family relationships and racial empathy
+         V201626:V201627, # Self-censorship
+         V201639:V201640, # Sexism
+         V201602:V201605x, # Political violence
+         V202022:V202024) # Discussing politics
 
 # Pre-election media responses
 anes_media <- anes %>%
@@ -155,6 +157,7 @@ The following code can be used to bring in the Ad Fontes Media data and create a
 
 ```{r load-ad-fontes-media}
 library(plotly)
+library(ggrepel)
 
 adfontes <- read_csv('data/raw/adfontes.csv') %>%
   mutate(Media = factor(ifelse(Media == "ONLINE NEWSPAPER",
@@ -167,6 +170,7 @@ adfontes <- read_csv('data/raw/adfontes.csv') %>%
          Code != 'V201634g')
 
 adfontes_plot <- adfontes %>%
+  mutate(Outlet = str_remove(Outlet, '\\s\\(.*\\)')) %>%
   ggplot(aes(x = Bias,
              y = Reliability,
              color = Media,
@@ -174,7 +178,13 @@ adfontes_plot <- adfontes %>%
   geom_point(alpha = 0.75) +
   scale_x_continuous(limits = c(-35, 35)) +
   scale_color_manual(values = c("steelblue", "goldenrod", "tomato")) +
-  theme_bw() 
+  theme_bw()
+
+# adfontes_plot +
+#   geom_text_repel(size = 3,
+#                   force = 0.5,
+#                   max.overlaps = 20) +
+#   theme(legend.position = 'bottom')
 
 ggplotly(adfontes_plot) %>%
   layout(legend = list(orientation = "h",
@@ -346,10 +356,16 @@ anes_empathy_df <- anes_to_model %>%
                                      Avg_Bias >= -15 & Avg_Bias < -5 ~ -1,
                                      TRUE ~ 0),
                            levels = c(0, -2, -1, 1, 2)),
+         Dir_Tot_Bias = factor(case_when(Total_Bias > 75 ~ 2,
+                                     Total_Bias < -75 ~ -2,
+                                     Total_Bias <= 75 & Avg_Bias > 25 ~ 1, 
+                                     Total_Bias >= -75 & Avg_Bias < -25 ~ -1,
+                                     TRUE ~ 0),
+                           levels = c(0, -2, -1, 1, 2)),
          value = ordered(value)) # Set the response to an ordered factor
 
 anes_empathy_df %>%
-  ggplot(aes(x = Abs_Bias,
+  ggplot(aes(x = Total_Bias,
              y = Avg_Rel,
              color = value)) +
   geom_point(alpha = 0.25) +
@@ -362,7 +378,7 @@ anes_empathy_df %>%
 
 
 # Plot Reliability vs Bias for political party affiliation
-anes_plt_df %>%
+anes_empathy_df %>%
   select(!c(empathy, value)) %>%
   distinct() %>%
   filter(V201018 >= -1) %>%
@@ -372,7 +388,7 @@ anes_plt_df %>%
   geom_point(alpha = 0.25)
 
 # Do the same plot but with only R, D, and I and recolored
-anes_plt_df %>%
+anes_empathy_df %>%
   select(!c(empathy, value)) %>%
   distinct() %>%
   filter(V201018 %in% c(1, 2, 4, 5),
@@ -390,7 +406,7 @@ anes_plt_df %>%
   theme_bw()
 
 # Plot Reliability vs Bias for each of the fampol and empathy
-anes_plt_df %>%
+anes_empathy_df %>%
   filter(Avg_Bias != 0 & Avg_Rel != 0) %>%
   ggplot(aes(x = Avg_Bias,
              y = Avg_Rel,
