@@ -136,7 +136,7 @@ anes_imputed <- anes_to_impute %>%
 
 stopCluster(cl)
 
-saveRDS(anes_imputed, 'data/interim/missForst-imputed.RDS')
+saveRDS(anes_imputed, 'data/interim/missForest-imputed.RDS')
 ```
 
 The imputation ended at iteration 9 as the differences increased and so iteration 8 was taken as the final estimate.
@@ -146,7 +146,7 @@ Calculate # of rows of non-missing data in responses
 
 ```{r}
 anes %>%
-  filter(across(c(V201114:V201123,
+  filter(if_all(c(V201114:V201123,
                   V202451:V202455,
                   V201626:V201627,
                   V201639:V201640,
@@ -168,12 +168,18 @@ anes %>%
                   V201602:V201605x,
                   V202022:V202024) %>%
   bind_cols(anes_imputed$ximp) %>%
-  filter(across(c(V201630a:V201630r, # TV programs 1
+  filter(if_all(c(V201114:V201123,
+                  V202451:V202455,
+                  V201626:V201627,
+                  V201639:V201640,
+                  V201602:V201605x,
+                  V202022:V202024,
+                  V201630a:V201630r, # TV programs 1
                   V201631a:V201631r, # TV programs 2
                   V201633a:V201633r, # Radio programs
                   V201634a:V201634c,V201634e:V201634f, V201634h,
                   V201634j:V201634q, # Websites not included in 'online newspapers'
-                  V201636a:V201636d), ~ . >= 0)) %>%
+                  V201636a:V201636d), ~ as.numeric(as.character(.)) >= 0)) %>%
   nrow()
 ```
 
