@@ -205,7 +205,7 @@ adfontes %>%
             median_bias = median(Bias))
 ```
 
-Like the scatter plot mentioned earlier, the analysis of the radio programs shows that they tend to have lower reliability scores and a strong right-leaning bias, compared to other media types.
+Like the scatter plot above, the analysis of the radio programs shows that they tend to have lower reliability scores and a strong right-leaning bias, compared to other media types.
 
 To explore the correlation between bias and reliability, the absolute values of the bias scores will be used to fit a linear model. The results of this model, including the correlation coefficient and p-value, will then be displayed in a replotted version of the data.
 
@@ -250,8 +250,7 @@ media_codes <- adfontes %>%
 anes_imputed_media <- anes_imputed$ximp %>%
   select(all_of(media_codes)) %>%
   # Convert to character then to numeric to avoid re-coding by going straight from factor to numeric
-  mutate(across(everything(), as.character),
-         across(everything(), as.numeric))
+  mutate(across(everything(), ~ as.numeric(as.character(.))))
 ```
 
 The total, average, and median Bias and Reliability scores for the media consumed by each participant will be calculated. Bias will also be left as-is so that respondents who consume media equally on both sides can be centered (toward 0).
@@ -259,7 +258,6 @@ The total, average, and median Bias and Reliability scores for the media consume
 ```{r bias-rel-sum-stats}
 # Set 0's in the media vars to NA so they are not calculated and to allow for Bias == 0 to be
 # included
-
 anes_imputed_media[anes_imputed_media == 0] <- NA
 
 # Multiply col-wise to get the Bias and Reliability within each column
@@ -299,6 +297,8 @@ anes_imputed_media <- anes_imputed_media %>%
          across(c(Median_Bias, Median_Rel),
                 ~ replace(., is.na(.), 0)))
 
+# Reset the NAs to 0
+anes_imputed_media[is.na(anes_imputed_media)] <- 0
 
 anes_imputed_media %>%
   select(Total_Bias:Median_Rel) %>%

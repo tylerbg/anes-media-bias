@@ -15,8 +15,6 @@ setwd("~/anes-media-bias")
 
 Load in the data set and remove all of the variables with zero variance (have only a single value).  Also drop all of the variables that will be used as responses in modeling.
 
-As 
-
 ```{r load-libs-and-data, warning = FALSE}
 library(tidyverse)
 
