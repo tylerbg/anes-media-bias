@@ -197,12 +197,14 @@ The scatter plot reveals that radio programs typically have a right-leaning bias
 The following code will calculate and print the average and median reliability and bias scores for each type of media, as well as the count of media sources with a "left", "right", or "center" bias.
 
 ```{r}
-adfontes %>%
+adfontes_media_summ <- adfontes %>%
   group_by(Media) %>%
   summarize('Mean Reliability' = mean(Reliability),
             'Median Reliability' = median(Reliability),
             'Mean Bias' = mean(Bias),
             'Median Bias' = median(Bias))
+
+adfontes_media_summ
 ```
 
 Like the scatter plot above, the analysis of the radio programs shows that they tend to have lower reliability scores and a strong right-leaning bias, compared to other media types.
@@ -319,11 +321,251 @@ anes_imputed_media %>%
   select(Total_Bias:Median_Rel) %>%
   filter(Total_Rel != 0) %>%
   pivot_longer(everything()) %>%
+  mutate(name = factor(name,
+                       levels = c("Avg_Bias", "Median_Bias", "Total_Bias",
+                                  "Avg_Rel", "Median_Rel", "Total_Rel"),
+                       labels = c('Average Bias', 'Median Bias', 'Total Bias',
+                                  'Average Reliability', 'Median Reliability', 'Total Reliability'))) %>%
   ggplot(aes(x = value)) +
     geom_histogram(bins = 30) +
     facet_wrap(~ name, scales = 'free') +
+    labs(x = "Value",
+         y = "Count") +
     theme_classic()
 ```
 
-After removal the data is still non-normal, but approachable for modeling. The most normal is *Total_Bias*, which centers slightly left and has a right skew. 
+After removal the data is still non-normal, but approachable for modeling. The most normal is *Total Bias*, which centers slightly left and has a right skew.
+
+To get an idea of the distribution of political affiliation for the respondents, a bar plot with the total count for each response is presented below.
+
+```{r}
+# Plot the total number of respondents in each political affiliation
+anes_registration %>%
+  select(V201018) %>%
+  group_by(V201018) %>%
+  summarize(n = n()) %>%
+  ggplot(aes(x = ordered(V201018),
+             y = n)) +
+    geom_col() +
+    scale_x_discrete(labels = c('Refused', 'Dont Know', 'Inapplicable', 'D', 'R', 'I', 'Other')) +
+    labs(x = "Party affiliation",
+         y = "Count") +
+    theme_classic()
+```
+
+Nearly half of the respondents did not include a political affiliation, while those who did fell into Democrat, Republican, Independent, or Other in order of decreasing total counts. Only a small amount of respondents refused to answer the question.
+
+To model the empathy responses, a new dataframe will be created that includes each of the four empathy variables, pre- and post-election weights, party registration, and the imputed bias and reliability scores. Additionally, the average and total bias scores will be grouped into either 'left', 'center-left', 'center', 'center-right', or 'right'.
+
+```{r}
+anes_empathy_df <- anes_registration %>%
+  bind_cols(anes_weights, anes_emotion, anes_imputed_media) %>%
+  select(V200010a, # Pre-election weights
+         V200010b, # Post-election weights
+         V201018, # Party registration
+         V202451:V202455, # Empathy
+         Total_Bias:last_col()) %>%
+  pivot_longer(V202452:V202455,
+               names_to = 'empathy',
+               values_to = 'value') %>%
+  # Filter out non-respondents for empathy questions 
+  filter(value > 0,
+         # Filter respondents who did not consume any of the media sources, which would have
+         # a reliability score = 0
+         Avg_Rel != 0) %>%
+  mutate(Abs_Bias = abs(Avg_Bias), # New variable with absolute value of bias
+         # New variable that indicates direction of bias
+         Dir_Bias = factor(case_when(Avg_Bias > 15 ~ 2,
+                                     Avg_Bias < -15 ~ -2,
+                                     Avg_Bias <= 15 & Avg_Bias > 5 ~ 1, 
+                                     Avg_Bias >= -15 & Avg_Bias < -5 ~ -1,
+                                     TRUE ~ 0),
+                           levels = c(0, -2, -1, 1, 2)),
+         Dir_Tot_Bias = factor(case_when(Total_Bias > 75 ~ 2,
+                                     Total_Bias < -75 ~ -2,
+                                     Total_Bias <= 75 & Total_Bias > 25 ~ 1, 
+                                     Total_Bias >= -75 & Total_Bias < -25 ~ -1,
+                                     TRUE ~ 0),
+                           levels = c(0, -2, -1, 1, 2)),
+         value = ordered(value)) # Set the response to an ordered factor
+```
+
+Next, the average reliability score will be plotted against their average and total bias scores for each respondent who identified with a political party, which will be identified by color.
+
+```{r}
+# Plot Reliability vs Bias for political party affiliation (only R, D, and I)
+affil_plt1 <- anes_empathy_df %>%
+  select(!c(empathy, value)) %>%
+  distinct() %>%
+  filter(V201018 %in% c(1, 2, 4, 5),
+         Avg_Bias != 0 & Avg_Rel != 0) %>%
+  ggplot(aes(x = Avg_Bias,
+             y = Avg_Rel,
+             color = ordered(V201018))) +
+  geom_point(alpha = 0.25) +
+  scale_color_manual(values = c('blue', 'red', 'grey50', 'green'),
+                     labels = c('Democrat', 'Republican', 'Independent', 'Other')) +
+  scale_x_continuous(limits = c(-35, 35)) +
+  labs(x = "Average bias",
+       y = "Average reliability",
+       color = 'Party affiliation') +
+  theme_bw() +
+  theme(legend.position = 'bottom')
+
+affil_plt2 <- anes_empathy_df %>%
+  select(!c(empathy, value)) %>%
+  distinct() %>%
+  filter(V201018 %in% c(1, 2, 4, 5),
+         Avg_Bias != 0 & Avg_Rel != 0) %>%
+  ggplot(aes(x = Total_Bias,
+             y = Avg_Rel,
+             color = ordered(V201018))) +
+  geom_point(alpha = 0.25) +
+  scale_color_manual(values = c('blue', 'red', 'grey50', 'green'),
+                     labels = c('Democrat', 'Republican', 'Independent', 'Other')) +
+  scale_x_continuous(limits = c(-250, 250)) +
+  labs(x = "Total bias",
+       y = "Average reliability",
+       color = 'Party affiliation') +
+  theme_bw() +
+  theme(legend.position = 'bottom')
+
+affil_plt1
+affil_plt2
+```
+
+The above plots will be re-plotted with the response to each empathy question colored.
+
+```{r}
+# Plot Reliability vs Bias for each empathy var
+empathy_plt1 <- anes_empathy_df %>%
+  ggplot(aes(x = Avg_Bias,
+             y = Avg_Rel,
+             color = value)) +
+  geom_point(alpha = 0.25) +
+  facet_wrap(~ empathy) +
+  theme_bw() +
+  labs(x = 'Average Bias',
+       y = 'Average Reliability') +
+  theme(legend.position = 'bottom')
+
+empathy_plt2 <- anes_empathy_df %>%
+  ggplot(aes(x = Total_Bias,
+             y = Avg_Rel,
+             color = value)) +
+  geom_point(alpha = 0.25) +
+  facet_wrap(~ empathy) +
+  theme_bw() +
+  labs(x = 'Total Bias',
+       y = 'Average Reliability') +
+  theme(legend.position = 'bottom')
+
+empathy_plt1
+empathy_plt2
+```
+
+An example model using the first empathy question, V202452, will be fit and assessed.
+
+```{r}
+library(VGAM)
+
+anes_empathy1_df <- anes_empathy_df %>%
+  filter(empathy == 'V202452')
+
+# Modify case weights based on total responses to the response question
+# Example weight = original weight * downsampling factor
+n_samples <- nrow(anes_empathy1_df)
+n_classes <- length(unique(anes_empathy1_df$value))
+anes_empathy1_df_case_wts <- anes_empathy1_df %>%
+  group_by(value) %>%
+  summarize(n_samples_j = n(),
+            case_wts = n_samples / (n_classes * n_samples_j))
+
+anes_empathy1_df <- anes_empathy1_df %>%
+  left_join(anes_empathy1_df_case_wts,
+            by = 'value') %>%
+  mutate(wts = V200010b * case_wts)
+
+# Fit null model
+null_fit <- anes_empathy1_df %>%
+  vglm(formula = value ~ 1,
+       weights = wts,
+            family = cumulative(link = 'logit',
+                                parallel = TRUE))
+
+# Model using average bias and reliability
+fit <- anes_empathy1_df %>%
+  vglm(formula = value ~ Avg_Rel + Avg_Bias,
+       weights = wts,
+            family = cumulative(link = 'logit',
+                                parallel = TRUE))
+
+# Model using the absolute value of average bias with a directional term
+fit2 <- anes_empathy1_df %>%
+  vglm(formula = value ~ Avg_Rel + Abs_Bias + Dir_Bias,
+       weights = wts,
+            family = cumulative(link = 'logit',
+                                parallel = TRUE))
+
+# Model using Total_Bias and no directional term
+fit3 <- anes_empathy1_df %>%
+  vglm(formula = value ~ Avg_Rel * Total_Bias,
+       weights = wts,
+            family = cumulative(link = 'logit',
+                                parallel = TRUE))
+
+logLik(null_fit)
+logLik(fit)
+logLik(fit2)
+logLik(fit3)
+
+# Compare to null model
+logLik(fit3) - logLik(null_fit)
+
+# deviance test for lack of fit
+g2 = deviance(fit3)
+df = df.residual(fit3)
+1 - pchisq(g2, df)
+
+# pearson test for lack of fit
+e = residuals(fit3, type='pearson')
+x2 = sum(e^2)
+1 - pchisq(x2, df)
+
+par(mfrow = c(2, 4))
+plot(fit3)
+par(mfrow = c(1, 1))
+
+# Model results
+anova(fit3, test = 'LR')
+summary(fit3)
+
+# Predictions
+fit_preds <- predict(fit3, type = 'response')
+
+preds <- apply(fit_preds, 1, which.max)
+
+# Confusion matrix and accuracy of model
+table(anes_empathy1_df$value,
+      preds)
+
+accuracy_vec(anes_empathy1_df$value,
+             factor(preds,
+                    levels = c(1, 2, 3, 4, 5)))
+
+anes_empathy1_df %>%
+  mutate(Dir_Tot_Bias = factor(Dir_Tot_Bias,
+                           levels = c(-2, -1, 0, 1, 2)),
+         value = factor(value,
+                        levels = c(5, 4, 3, 2, 1))) %>%
+ggplot(aes(y = Dir_Tot_Bias,
+           fill = value)) +
+  geom_bar(position = 'fill') +
+  scale_y_discrete(labels = c('Left', 'Center-left', 'Center', 'Center-right', 'Right')) +
+  theme_bw() +
+  labs(x = 'Proportion',
+       y = 'Bias leaning',
+       fill = 'Response')
+```
+
 
