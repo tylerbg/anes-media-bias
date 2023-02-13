@@ -48,9 +48,8 @@ The purpose of the analysis is to combine data from the ANES survey with the Ad 
 - *V201122* - how irritated R feels about how things are going in the country
 - *V201123* - how nervous R feels about how things are going in the country
 
-#### Family relations and empathy
+#### Racial empathy
 
-- *V202451* - how much have political differences hurt relationships w/family
 - *V202452* - how often does R have concerned feelings for other racial/ethnic groups
 - *V202453* - how often does R try to understand perspective of other racial/ethnic groups
 - *V202454* - how often R imagines how they would feel before criticizing other groups
@@ -73,8 +72,9 @@ The purpose of the analysis is to combine data from the ANES survey with the Ad 
 - *V201604* - has it [increased/decreased] a great deal, a moderate amount, or a little?
 - *V201605x* - Summary of V201603 and V201604
 
-#### Discussing politics
+#### Discussing politics with family
 
+- *V202451* - how much have political differences hurt relationships w/family
 - *V202022* - Do you ever discuss politics with your family or friends?
 - *V202023* - How many days in the past week did you talk about politics with family or friends?
 - *V202024* - During the past 12 months, have you ever gotten into a political argument with someone, or have you not done this in the past 12 months?
@@ -164,6 +164,7 @@ The following code loads the Ad Fontes Media data and creates an interactive cha
 ```{r load-ad-fontes-media}
 library(plotly)
 library(ggrepel)
+library(ggchicklet)
 
 adfontes <- read_csv('data/raw/adfontes.csv') %>%
   mutate(Media = factor(ifelse(Media == "ONLINE NEWSPAPER",
@@ -175,14 +176,25 @@ adfontes <- read_csv('data/raw/adfontes.csv') %>%
          Code != 'V201634i',
          Code != 'V201634g')
 
+rectangles <- data.frame(xmin = c(-42, 42),
+                         xmax = c(42, 42),
+                         ymin = c(0, 16),
+                         ymax = c(16, 46))
+
 adfontes_plot <- adfontes %>%
   mutate(Outlet = str_remove(Outlet, '\\s\\(.*\\)')) %>%
   ggplot(aes(x = Bias,
              y = Reliability,
              color = Media,
              label = Outlet)) +
+  ggchicklet:::geom_rrect(aes(xmin = -42, xmax = 42,
+                              ymin = 0, ymax = 16),
+                          fill = NA) +
   geom_point(alpha = 0.75) +
-  scale_x_continuous(limits = c(-35, 35)) +
+  scale_x_continuous(limits = c(-42, 42),
+                     breaks = c(-42, -30, -18, -6, 0, 6, 18, 30, 42)) +
+  scale_y_continuous(limits = c(0, 64),
+                     breaks = seq(0, 64, 8)) +
   scale_color_manual(values = c("steelblue", "goldenrod", "tomato")) +
   theme_bw()
 
@@ -415,8 +427,7 @@ affil_plt1 <- anes_empathy_df %>%
 affil_plt2 <- anes_empathy_df %>%
   select(!c(empathy, value)) %>%
   distinct() %>%
-  filter(V201018 %in% c(1, 2, 4, 5),
-         Avg_Bias != 0 & Avg_Rel != 0) %>%
+  filter(V201018 %in% c(1, 2, 4, 5)) %>%
   ggplot(aes(x = Total_Bias,
              y = Avg_Rel,
              color = ordered(V201018))) +
@@ -433,6 +444,135 @@ affil_plt2 <- anes_empathy_df %>%
 affil_plt1
 affil_plt2
 ```
+
+
+
+
+```{r}
+demo_lm <- anes_empathy_df %>%
+  filter(V201018 == 1,
+         empathy == 'V202452') %>%
+  lm(formula = Avg_Rel ~ abs(Avg_Bias)) %>%
+  summary()
+
+repub_lm <- anes_empathy_df %>%
+  filter(V201018 == 2,
+         empathy == 'V202452') %>%
+  lm(formula = Avg_Rel ~ abs(Avg_Bias)) %>%
+  summary()
+
+indep_lm <- anes_empathy_df %>%
+  filter(V201018 == 4,
+         empathy == 'V202452') %>%
+  lm(formula = Avg_Rel ~ abs(Avg_Bias)) %>%
+  summary()
+
+other_lm <- anes_empathy_df %>%
+  filter(V201018 == 5,
+         empathy == 'V202452') %>%
+  lm(formula = Avg_Rel ~ abs(Avg_Bias)) %>%
+  summary()
+
+anes_empathy_df %>%
+  filter(V201018 >= 1,
+         empathy == 'V202452') %>%
+  ggplot(aes(x = abs(Avg_Bias),
+             y = Avg_Rel,
+             color = ordered(V201018))) +
+  geom_point(alpha = 0.25) +
+  geom_abline(slope = demo_lm$coefficients[2, 1],
+              intercept = demo_lm$coefficients[1, 1],
+              lty = 'dashed',
+              color = 'blue',
+              size = 1) +
+  geom_abline(slope = repub_lm$coefficients[2, 1],
+              intercept = repub_lm$coefficients[1, 1],
+              lty = 'dashed',
+              color = 'red',
+              size = 1) +
+  geom_abline(slope = indep_lm$coefficients[2, 1],
+              intercept = indep_lm$coefficients[1, 1],
+              lty = 'dashed',
+              color = 'grey50',
+              size = 1) +
+  geom_abline(slope = other_lm$coefficients[2, 1],
+              intercept = other_lm$coefficients[1, 1],
+              lty = 'dashed',
+              color = 'green',
+              size = 1) +
+  scale_color_manual(values = c('blue', 'red', 'grey50', 'green'),
+                     labels = c('Democrat', 'Republican', 'Independent', 'Other')) +
+  labs(x = 'Absolute total bias',
+       y = 'Average reliability') +
+  theme_bw()
+```
+
+
+
+
+
+```{r}
+demo_lm <- anes_empathy_df %>%
+  filter(V201018 == 1,
+         empathy == 'V202452') %>%
+  lm(formula = Avg_Rel ~ abs(Total_Bias)) %>%
+  summary()
+
+repub_lm <- anes_empathy_df %>%
+  filter(V201018 == 2,
+         empathy == 'V202452') %>%
+  lm(formula = Avg_Rel ~ abs(Total_Bias)) %>%
+  summary()
+
+indep_lm <- anes_empathy_df %>%
+  filter(V201018 == 4,
+         empathy == 'V202452') %>%
+  lm(formula = Avg_Rel ~ abs(Total_Bias)) %>%
+  summary()
+
+other_lm <- anes_empathy_df %>%
+  filter(V201018 == 5,
+         empathy == 'V202452') %>%
+  lm(formula = Avg_Rel ~ abs(Total_Bias)) %>%
+  summary()
+
+anes_empathy_df %>%
+  filter(V201018 >= 1,
+         empathy == 'V202452') %>%
+  ggplot(aes(x = abs(Total_Bias),
+             y = Avg_Rel,
+             color = ordered(V201018))) +
+  geom_point(alpha = 0.25) +
+  geom_abline(slope = demo_lm$coefficients[2, 1],
+              intercept = demo_lm$coefficients[1, 1],
+              lty = 'dashed',
+              color = 'blue',
+              size = 1) +
+  geom_abline(slope = repub_lm$coefficients[2, 1],
+              intercept = repub_lm$coefficients[1, 1],
+              lty = 'dashed',
+              color = 'red',
+              size = 1) +
+  geom_abline(slope = indep_lm$coefficients[2, 1],
+              intercept = indep_lm$coefficients[1, 1],
+              lty = 'dashed',
+              color = 'grey50',
+              size = 1) +
+  geom_abline(slope = other_lm$coefficients[2, 1],
+              intercept = other_lm$coefficients[1, 1],
+              lty = 'dashed',
+              color = 'green',
+              size = 1) +
+  scale_color_manual(values = c('blue', 'red', 'grey50', 'green'),
+                     labels = c('Democrat', 'Republican', 'Independent', 'Other')) +
+  labs(x = 'Absolute total bias',
+       y = 'Average reliability') +
+  theme_bw()
+  
+```
+
+
+
 
 The above plots will be re-plotted with the response to each empathy question colored.
 
@@ -476,15 +616,15 @@ anes_empathy1_df <- anes_empathy_df %>%
 # Example weight = original weight * downsampling factor
 n_samples <- nrow(anes_empathy1_df)
 n_classes <- length(unique(anes_empathy1_df$value))
-anes_empathy1_df_case_wts <- anes_empathy1_df %>%
+anes_empathy1_df_class_wts <- anes_empathy1_df %>%
   group_by(value) %>%
   summarize(n_samples_j = n(),
-            case_wts = n_samples / (n_classes * n_samples_j))
+            class_wts = n_samples / (n_classes * n_samples_j))
 
 anes_empathy1_df <- anes_empathy1_df %>%
-  left_join(anes_empathy1_df_case_wts,
+  left_join(anes_empathy1_df_class_wts,
             by = 'value') %>%
-  mutate(wts = V200010b * case_wts)
+  mutate(wts = V200010b * class_wts)
 
 # Fit null model
 null_fit <- anes_empathy1_df %>%
