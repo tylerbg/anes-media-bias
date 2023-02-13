@@ -187,16 +187,93 @@ adfontes_plot <- adfontes %>%
              y = Reliability,
              color = Media,
              label = Outlet)) +
-  ggchicklet:::geom_rrect(aes(xmin = -42, xmax = 42,
-                              ymin = 0, ymax = 16),
-                          fill = NA) +
+  ggchicklet:::geom_rrect(aes(xmin = -41.5, xmax = 41.5,
+                              ymin = 0.5, ymax = 16),
+                          fill = NA,
+                          color = 'pink',
+                          lty = 3) +
+  ggchicklet:::geom_rrect(aes(xmin = -41.5, xmax = 41.5,
+                              ymin = 16, ymax = 46),
+                          fill = NA,
+                          color = 'tan1',
+                          lty = 3) +
+  ggchicklet:::geom_rrect(aes(xmin = -22, xmax = 22,
+                              ymin = 24, ymax = 46),
+                          fill = NA,
+                          color = 'khaki2',
+                          lty = 3) +
+  ggchicklet:::geom_rrect(aes(xmin = -16, xmax = 16,
+                              ymin = 40, ymax = 63),
+                          fill = NA,
+                          color = 'aquamarine3',
+                          lty = 3) +
+  ggchicklet:::geom_rrect(aes(xmin = 44, xmax = 72,
+                              ymin = 33, ymax = 39),
+                          fill = NA,
+                          color = 'pink',
+                          lty = 3) +
+  ggchicklet:::geom_rrect(aes(xmin = 44, xmax = 72,
+                              ymin = 41, ymax = 47),
+                          fill = NA,
+                          color = 'tan1',
+                          lty = 3) +
+  ggchicklet:::geom_rrect(aes(xmin = 44, xmax = 72,
+                              ymin = 49, ymax = 55),
+                          fill = NA,
+                          color = 'khaki2',
+                          lty = 3) +
+  ggchicklet:::geom_rrect(aes(xmin = 44, xmax = 72,
+                              ymin = 57, ymax = 63),
+                          fill = NA,
+                          color = 'aquamarine3',
+                          lty = 3) +
+  annotate(geom = 'text',
+           x = c(-36, -24, -12, 0, 12, 24, 36),
+           y = rep(68, 7),
+           label = c('Most Extreme\nLeft',
+                     'Hyper-Partisan\nLeft',
+                     'Skews Left',
+                     'Middle Bias',
+                     'Skews Right',
+                     'Hyper-Partisan\nRight',
+                     'Most Extreme\nRight'),
+           size = 3) +
+  annotate(geom = 'text',
+           x = rep(-60, 8),
+           y = seq(4, 62, 8),
+           label = c("Original Fact\nReporting",
+                     "Fact Reporting",
+                     "Complex Analysis\nor Mix of Fact\nReporting and\nAnalysis",
+                     "Analysis or High\nVariation in\nReliability",
+                     "Opinion or High\nVariation in\nReliability",
+                     "Selective or\nIncomplete Story /\nUnfair Persuasion\n / Propaganda",
+                     "Contains\nMisleading Info",
+                     "Contains\nInaccurate /\nFabricated Info"),
+           size = 3) +
+  annotate(geom = 'text',
+           x = rep(58, 4),
+           y = c(36, 44, 52, 60),
+           label = c('Most reliable\nfor news',
+                     'Reliable for news,\nbut high in analysis /\nopinion content',
+                     'Some reliability issues\nand / or extremism',
+                     'Serious reliability issues\nand / or extremism'),
+           size = 3) +
   geom_point(alpha = 0.75) +
-  scale_x_continuous(limits = c(-42, 42),
-                     breaks = c(-42, -30, -18, -6, 0, 6, 18, 30, 42)) +
-  scale_y_continuous(limits = c(0, 64),
-                     breaks = seq(0, 64, 8)) +
+  scale_x_continuous(breaks = c(-42, -30, -18, -6, 0, 6, 18, 30, 42),
+                     minor_breaks = NULL,
+                     expand = c(0, 0)) +
+  scale_y_continuous(breaks = seq(0, 64, 8),
+                     minor_breaks = NULL,
+                     expand = c(0, 0)) +
+  coord_cartesian(xlim = c(-42, 42),
+                  ylim = c(0, 64),
+                  clip = 'off') +
   scale_color_manual(values = c("steelblue", "goldenrod", "tomato")) +
-  theme_bw()
+  theme_bw() +
+  theme(plot.margin = margin(1.5, 6, 0.1, 5, "cm"),
+        legend.position = 'bottom')
+
+adfontes_plot
 
 ggplotly(adfontes_plot) %>%
   layout(legend = list(orientation = "h",

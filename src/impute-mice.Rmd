@@ -1,0 +1,106 @@
+---
+title: "Untitled"
+output: html_document
+date: "2023-02-13"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load in the data set and remove all of the variables with zero variance (have only a single value).  Also drop all of the variables that will be used as responses in modeling.
+
+```{r load-libs-and-data, warning = FALSE}
+library(tidyverse)
+
+anes <- read_csv("data/raw/anes_timeseries_2020_csv_20220210.csv",
+                 show_col_types = FALSE)
+
+# Keep only pre- and post-election vars and pre- and post-election case weights
+anes_weights <- anes %>%
+  select(V200010a, V200010b)# Post-election weights
+
+anes_pre_post <- anes %>%
+  select(c(V201001:V201658p, # Pre-election vars
+           V202001:V202645n)) # Post-election vars
+
+# Move response vars to a new df
+anes_response <- anes_pre_post %>%
+  select(c(V202541a:V202547,
+           V201114:V201123,
+           V202451:V202456,
+           V201626:V201627,
+           V201639:V201640,
+           V201602:V201605x,
+           V202022:V202024))
+
+anes_pre_post <- anes_pre_post %>%
+  select(!all_of(colnames(anes_response)))
+
+# Remove vars with 0 variance
+n_unique <- apply(anes_pre_post,
+                  2,
+                  function(x) length(unique(x)))
+
+cols_to_keep <- names(n_unique)[n_unique > 1]
+
+anes_pre_post <- anes_pre_post %>%
+  select(all_of(cols_to_keep))
+
+# Get the pre-election media responses with Ad Fontes annotation
+adfontes <- read_csv('data/raw/adfontes.csv')
+media_var_names <- adfontes$Code
+anes_media <- anes %>%
+  select(all_of(media_var_names))
+```
+
+For the media variables set any values of -9 (Refused), -5 (Interview breakoff (sufficient partial IW)), and -1 (inapplicable) to missing values (NA).
+
+```{r set-na}
+# In media vars convert -9 (Refused), -5 (Interview breakoff (sufficient partial IW)), and
+# -1 (inapplicable) to NA
+anes_to_impute <- anes %>%
+  mutate(across(everything(),
+                as.numeric),
+         across(all_of(media_var_names),
+                ~ as.factor(as.character(ifelse(. < 0, NA, .))))) %>%
+  as.data.frame()
+```
+
+```{r}
+# Creat a list of NULL values the length of the number of columns for the imputation dataset
+impute_classwts <- vector(mode = 'list', length = ncol(anes_to_impute))
+
+# Add the column names to the list for matching
+names(impute_classwts) <- colnames(anes_to_impute)
+
+# Calculate the case weights for each factor variable
+media_classwts <- anes_to_impute %>%
+  select(where(is.factor)) %>%
+  pivot_longer(everything()) %>%
+  drop_na() %>%
+  group_by(name) %>%
+  summarize(n_samples = n(),
+            n_samples0 = sum(value == '0'),
+            n_samples1 = sum(value == '1'),
+            '0' = n_samples / (2 * n_samples0),
+            '1' = n_samples / (2 * n_samples1)) %>%
+  select(name, '0', '1')
+
+# Add the case weights for each factor variable, leaving continuous variables as NULL
+for (ii in 1:nrow(media_classwts)) {
+  index <- which(names(impute_classwts) %in% media_classwts[ii, 'name'])
+  
+  impute_classwts[[index]] <- cbind(media_classwts[ii, '0'], 
+                                   media_classwts[ii, '1'])
+}
+```
+
+```{r}
+library(mice)
+
+n_cores <- parallel::detectCores()
+```
+
