@@ -26,18 +26,30 @@ anes_pre_post <- anes %>%
   select(c(V201001:V201658p, # Pre-election vars
            V202001:V202645n)) # Post-election vars
 
+## Actually keep response vars in
 # Move response vars to a new df
-anes_response <- anes_pre_post %>%
+# anes_response <- anes_pre_post %>%
+#   select(c(V202541a:V202547,
+#            V201114:V201123,
+#            V202451:V202456,
+#            V201626:V201627,
+#            V201639:V201640,
+#            V201602:V201605x,
+#            V202022:V202024))
+# 
+# anes_pre_post <- anes_pre_post %>%
+#   select(!all_of(colnames(anes_response)))
+# 
+# Make list of response vars to not be removed
+response_vars <- anes_pre_post %>%
   select(c(V202541a:V202547,
            V201114:V201123,
            V202451:V202456,
            V201626:V201627,
            V201639:V201640,
            V201602:V201605x,
-           V202022:V202024))
-
-anes_pre_post <- anes_pre_post %>%
-  select(!all_of(colnames(anes_response)))
+           V202022:V202024)) %>%
+  colnames()
 
 # Remove vars with 0 variance
 n_unique <- apply(anes_pre_post,
@@ -48,12 +60,68 @@ cols_to_keep <- names(n_unique)[n_unique > 1]
 
 anes_pre_post <- anes_pre_post %>%
   select(all_of(cols_to_keep))
+```
 
-# Get the pre-election media responses with Ad Fontes annotation
+
+```{r}
+# Get the pre-election media responses that are measured by Ad Fontes Media
 adfontes <- read_csv('data/raw/adfontes.csv')
 media_var_names <- adfontes$Code
+
 anes_media <- anes %>%
   select(all_of(media_var_names))
+
+anes_response <- anes %>%
+  select(all_of(response_vars))
+
+# Remove variables lowly correlated with media vars
+media_cors <- cor(anes_pre_post %>% select(!all_of(media_var_names) &
+                                           !all_of(response_vars)),
+    anes_pre_post %>% select(all_of(media_var_names)),
+    method = 'pearson')
+
+media_cors_df <- media_cors %>%
+  as.data.frame()
+
+rownames(media_cors_df) <- rownames(media_cors)
+
+max_cors <- apply(media_cors_df,
+                  1,
+                  max)
+
+vars_to_remove <- names(which(max_cors < 0.1))
+
+anes_pre_post2 <- anes_pre_post %>%
+  select(!all_of(vars_to_remove))
+
+# Print number of variables removed
+length(vars_to_remove)
+
+# Remove highly correlated variables
+anes_other_vars <- anes_pre_post2 %>%
+                  select(!all_of(media_var_names) &
+                         !all_of(response_vars))
+
+anes_cor <- cor(anes_other_vars,
+                method = 'spearman')
+
+anes_cor[upper.tri(anes_cor)] <- 0
+diag(anes_cor) <- 0
+
+cols_to_remove <- anes_other_vars[, apply(anes_cor,
+                                         2,
+                                         function(x) any(abs(x) > 0.90,
+                                                         na.rm = TRUE))] %>%
+  colnames()
+
+anes_pre_post3 <- anes_pre_post2 %>%
+  select(!all_of(cols_to_remove))
+
+# Print # of columns removed
+ncol(anes_pre_post2) - ncol(anes_pre_post3)
+
+# Print final # of variables
+ncol(anes_pre_post3)
 ```
 
 For the media variables set any values of -9 (Refused), -5 (Interview breakoff (sufficient partial IW)), and -1 (inapplicable) to missing values (NA).
@@ -61,7 +129,7 @@ For the media variables set any values of -9 (Refused), -5 (Interview breakoff (
 ```{r set-na}
 # In media vars convert -9 (Refused), -5 (Interview breakoff (sufficient partial IW)), and
 # -1 (inapplicable) to NA
-anes_to_impute <- anes %>%
+anes_to_impute <- anes_pre_post3 %>%
   mutate(across(everything(),
                 as.numeric),
          across(all_of(media_var_names),
@@ -71,36 +139,55 @@ anes_to_impute <- anes %>%
 
 ```{r}
 # Creat a list of NULL values the length of the number of columns for the imputation dataset
-impute_classwts <- vector(mode = 'list', length = ncol(anes_to_impute))
-
-# Add the column names to the list for matching
-names(impute_classwts) <- colnames(anes_to_impute)
-
-# Calculate the case weights for each factor variable
-media_classwts <- anes_to_impute %>%
-  select(where(is.factor)) %>%
-  pivot_longer(everything()) %>%
-  drop_na() %>%
-  group_by(name) %>%
-  summarize(n_samples = n(),
-            n_samples0 = sum(value == '0'),
-            n_samples1 = sum(value == '1'),
-            '0' = n_samples / (2 * n_samples0),
-            '1' = n_samples / (2 * n_samples1)) %>%
-  select(name, '0', '1')
-
-# Add the case weights for each factor variable, leaving continuous variables as NULL
-for (ii in 1:nrow(media_classwts)) {
-  index <- which(names(impute_classwts) %in% media_classwts[ii, 'name'])
-  
-  impute_classwts[[index]] <- cbind(media_classwts[ii, '0'], 
-                                   media_classwts[ii, '1'])
-}
+# impute_classwts <- vector(mode = 'list',
+#                           length = ncol(anes_to_impute))
+# 
+# # Add the column names to the list for matching
+# names(impute_classwts) <- colnames(anes_to_impute)
+# 
+# # Calculate the case weights for each factor variable
+# media_classwts <- anes_to_impute %>%
+#   select(where(is.factor)) %>%
+#   pivot_longer(everything()) %>%
+#   drop_na() %>%
+#   group_by(name) %>%
+#   summarize(n_samples = n(),
+#             n_samples0 = sum(value == '0'),
+#             n_samples1 = sum(value == '1'),
+#             '0' = n_samples / (2 * n_samples0),
+#             '1' = n_samples / (2 * n_samples1)) %>%
+#   select(name, '0', '1')
+# 
+# # Add the case weights for each factor variable, leaving continuous variables as NULL
+# for (ii in 1:nrow(media_classwts)) {
+#   index <- which(names(impute_classwts) %in% media_classwts[ii, 'name'])
+#   
+#   impute_classwts[[index]] <- cbind(media_classwts[ii, '0'], 
+#                                    media_classwts[ii, '1'])
+# }
 ```
 
 ```{r}
 library(mice)
 
 n_cores <- parallel::detectCores()
+
+anes_imputed <- futuremice(anes_to_impute,
+                         m = n_cores,
+                         parallelseed = 4960,
+                         n.core = n_cores,
+                         method = 'rf')
+
+saveRDS(anes_imputed, "data/interim/imputed-mice-rf.RDS")
+```
+
+For each of the imputed datasets, calculate the total and average Bias and Reliability scores.
+
+```{r}
+anes_imputed %$% lm(V201630b ~ V202413) %>% pool %$% pooled
+
+model_formula <- as.formula(paste("V202452 ~", paste(media_vars, collapse = "+")))
+
+with(anes_imputed, expr = vglm)
 ```
 
